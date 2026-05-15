@@ -58,7 +58,7 @@ function App() {
       <nav className="topbar">
         <button className="brand" onClick={() => navigate("home")}>
           <BookOpenCheck size={24} />
-          <span>Vocab Card</span>
+          <span>Vocab 단어 테스트</span>
         </button>
         <div className="nav-actions">
           <IconButton label="홈" active={page === "home"} onClick={() => navigate("home")}>
@@ -134,7 +134,7 @@ function HomePage(props: {
     <section className="home-grid">
       <div className="hero-panel">
         <p className="eyebrow">Excel 기반 영단어 테스트</p>
-        <h1>Day별 단어를 카드로 풀고 틀린 횟수를 엑셀에 바로 누적합니다.</h1>
+        <h1>Vocab 단어 테스트</h1>
         <div className="quick-stats">
           <StatPill label="선택 Day" value={props.source || "전체"} />
           <StatPill label="문제 수" value={`${props.count}개`} />
