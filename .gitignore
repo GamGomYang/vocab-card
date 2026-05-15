@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+backend/.venv/
+
+# Node
+node_modules/
+dist/
+build/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# App data backups
+*.backup-*.xlsx
+~$*.xlsx
+logs/
