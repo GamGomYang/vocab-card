@@ -34,3 +34,4 @@ Thumbs.db
 *.backup-*.xlsx
 ~$*.xlsx
 logs/
+.edge-vocab-profile/
