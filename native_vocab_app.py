@@ -3,6 +3,7 @@ from __future__ import annotations
 import random
 import sqlite3
 import sys
+import os
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -515,14 +516,21 @@ class VocabApp(tk.Tk):
 
 def app_root() -> Path:
     cwd = Path.cwd()
-    if (cwd / "vocab.db").exists() or (cwd / "단어DB.xlsx").exists():
+    if (cwd / "단어DB.xlsx").exists():
         return Path.cwd()
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent
 
 
+def data_root() -> Path:
+    base = os.environ.get("LOCALAPPDATA")
+    root = Path(base) / "VocabCard" if base else Path.home() / "AppData" / "Local" / "VocabCard"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 if __name__ == "__main__":
     root = app_root()
-    app = VocabApp(WorkbookStore(root / "vocab.db", root / "단어DB.xlsx"))
+    app = VocabApp(WorkbookStore(data_root() / "vocab.db", root / "단어DB.xlsx"))
     app.mainloop()

@@ -3,6 +3,7 @@ from __future__ import annotations
 import random
 import sys
 import ctypes
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -18,11 +19,18 @@ SINGLE_INSTANCE_MUTEX = "VocabCardDesktopSingleInstance"
 
 def app_root() -> Path:
     cwd = Path.cwd()
-    if (cwd / "vocab.db").exists() or (cwd / "단어DB.xlsx").exists():
+    if (cwd / "frontend" / "dist" / "index.html").exists() or (cwd / "단어DB.xlsx").exists():
         return Path.cwd()
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent
+
+
+def data_root() -> Path:
+    base = os.environ.get("LOCALAPPDATA")
+    root = Path(base) / "VocabCard" if base else Path.home() / "AppData" / "Local" / "VocabCard"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def frontend_index(root: Path) -> Path:
@@ -166,7 +174,7 @@ if __name__ == "__main__":
     if not index.exists():
         raise FileNotFoundError(f"Frontend build was not found: {index}")
 
-    api = Api(WorkbookStore(root / "vocab.db", root / "단어DB.xlsx"))
+    api = Api(WorkbookStore(data_root() / "vocab.db", root / "단어DB.xlsx"))
     webview.create_window(
         "단어 테스트",
         index.as_uri(),
