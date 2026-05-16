@@ -17,6 +17,23 @@ ERROR_ALREADY_EXISTS = 183
 SINGLE_INSTANCE_MUTEX = "VocabCardDesktopSingleInstance"
 
 
+def choose_quiz_targets(pool: list[Word], count: int) -> list[Word]:
+    available = pool.copy()
+    targets = []
+    target_count = min(max(1, int(count)), len(available))
+
+    while len(targets) < target_count and available:
+        if len(available) == 1:
+            winner = available[0]
+        else:
+            first, second = random.sample(available, 2)
+            winner = min((first, second), key=lambda word: (word.total_count, random.random()))
+        targets.append(winner)
+        available.remove(winner)
+
+    return targets
+
+
 def app_root() -> Path:
     cwd = Path.cwd()
     if (cwd / "frontend" / "dist" / "index.html").exists() or (cwd / "단어DB.xlsx").exists():
@@ -76,7 +93,7 @@ class Api:
         if not pool:
             return []
 
-        targets = random.sample(pool, min(max(1, int(count)), len(pool)))
+        targets = choose_quiz_targets(pool, count)
         questions = []
         for target in targets:
             correct = target.meaning if mode == "word_to_meaning" else target.word
