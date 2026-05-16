@@ -324,7 +324,8 @@ function QuizPage(props: {
       <article className="quiz-card">
         <p>{props.mode === "word_to_meaning" ? "이 단어의 뜻으로 알맞은 것은?" : "이 뜻에 맞는 단어는?"}</p>
         <h2>{question.questionText}</h2>
-        {question.example && <span className="example-line">{question.example}</span>}
+        {result && question.example && <span className="example-line">{question.example}</span>}
+        {result && question.exampleMeaning && <span className="example-meaning-line">{question.exampleMeaning}</span>}
       </article>
 
       <div className="choices-grid">
@@ -345,34 +346,15 @@ function QuizPage(props: {
       </div>
 
       {result && (
-        <section className={`feedback ${result.isCorrect ? "correct" : "wrong"}`}>
-          <h3>{result.isCorrect ? "정답입니다." : "오답입니다."}</h3>
-          <dl>
-            <div>
-              <dt>정답</dt>
-              <dd>
-                {result.word} = {result.meaning}
-              </dd>
-            </div>
-            {!result.isCorrect && (
-              <div>
-                <dt>선택</dt>
-                <dd>{result.selectedAnswer}</dd>
-              </div>
-            )}
-            <div>
-              <dt>예문</dt>
-              <dd>{result.example || "-"}</dd>
-            </div>
-            <div>
-              <dt>해석</dt>
-              <dd>{result.exampleMeaning || "-"}</dd>
-            </div>
-            <div>
-              <dt>현재 오답 횟수</dt>
-              <dd>{result.wrongCount}회</dd>
-            </div>
-          </dl>
+        <section className={`quiz-result-bar ${result.isCorrect ? "correct" : "wrong"}`}>
+          <div>
+            <strong>{result.isCorrect ? "정답입니다." : "오답입니다."}</strong>
+            <span>
+              정답: {result.word} = {result.meaning}
+            </span>
+            {!result.isCorrect && <span>선택: {result.selectedAnswer}</span>}
+            <span>현재 오답 횟수 {result.wrongCount}회</span>
+          </div>
           <button className="primary-action compact" onClick={next}>
             {index + 1 >= questions.length ? "결과 보기" : "다음 문제"}
           </button>
