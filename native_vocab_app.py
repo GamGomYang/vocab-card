@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import random
+import sqlite3
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -55,43 +57,65 @@ class Word:
 
 
 class WorkbookStore:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, excel_path: Path | None = None) -> None:
         self.path = path
+        self.excel_path = excel_path or path.with_suffix(".xlsx")
         self.ensure_file()
+        self.import_excel_if_empty()
+
+    def connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.path)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    @contextmanager
+    def transaction(self):
+        connection = self.connect()
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def ensure_file(self) -> None:
-        if not self.path.exists():
-            workbook = Workbook()
-            sheet = workbook.active
-            sheet.title = "Words"
-            sheet.append(HEADERS)
-            workbook.save(self.path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.transaction() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS words (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source TEXT NOT NULL DEFAULT '',
+                    word TEXT NOT NULL,
+                    meaning TEXT NOT NULL,
+                    example TEXT NOT NULL DEFAULT '',
+                    example_meaning TEXT NOT NULL DEFAULT '',
+                    note TEXT NOT NULL DEFAULT '',
+                    correct_count INTEGER NOT NULL DEFAULT 0,
+                    wrong_count INTEGER NOT NULL DEFAULT 0,
+                    total_count INTEGER NOT NULL DEFAULT 0,
+                    last_result TEXT NOT NULL DEFAULT '',
+                    last_tested_at TEXT NOT NULL DEFAULT '',
+                    streak_correct INTEGER NOT NULL DEFAULT 0,
+                    memory_state TEXT NOT NULL DEFAULT '미학습',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(source, word, meaning)
+                )
+                """
+            )
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_words_source ON words(source)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_words_wrong_count ON words(wrong_count)")
+
+    def import_excel_if_empty(self) -> None:
+        if not self.excel_path.exists():
             return
-
-        workbook = load_workbook(self.path)
-        sheet = workbook.active
-        existing = [sheet.cell(1, col).value for col in range(1, sheet.max_column + 1)]
-        changed = False
-        for header in HEADERS:
-            if header not in existing:
-                sheet.cell(1, len(existing) + 1, header)
-                existing.append(header)
-                changed = True
-
-        columns = self.columns(sheet)
-        for row in range(2, sheet.max_row + 1):
-            for header in NUMERIC_HEADERS:
-                cell = sheet.cell(row, columns[header])
-                if cell.value in (None, ""):
-                    cell.value = 0
-                    changed = True
-            state = sheet.cell(row, columns["암기상태"])
-            if state.value in (None, ""):
-                state.value = "미학습"
-                changed = True
-
-        if changed:
-            workbook.save(self.path)
+        with self.transaction() as connection:
+            count = connection.execute("SELECT COUNT(*) FROM words").fetchone()[0]
+        if count == 0:
+            self.import_excel()
 
     @staticmethod
     def columns(sheet) -> dict[str, int]:
@@ -112,56 +136,182 @@ class WorkbookStore:
         except (TypeError, ValueError):
             return 0
 
+    def word_from_row(self, row: sqlite3.Row) -> Word:
+        return Word(
+            row=int(row["id"]),
+            source=self.text(row["source"]),
+            word=self.text(row["word"]),
+            meaning=self.text(row["meaning"]),
+            example=self.text(row["example"]),
+            example_meaning=self.text(row["example_meaning"]),
+            note=self.text(row["note"]),
+            correct_count=self.number(row["correct_count"]),
+            wrong_count=self.number(row["wrong_count"]),
+            total_count=self.number(row["total_count"]),
+            last_result=self.text(row["last_result"]),
+            last_tested_at=self.text(row["last_tested_at"]),
+            streak_correct=self.number(row["streak_correct"]),
+            memory_state=self.text(row["memory_state"]) or "미학습",
+        )
+
     def list_words(self) -> list[Word]:
-        workbook = load_workbook(self.path)
-        sheet = workbook.active
-        columns = self.columns(sheet)
-        words: list[Word] = []
-        for row in range(2, sheet.max_row + 1):
-            word = self.text(sheet.cell(row, columns["단어"]).value)
-            meaning = self.text(sheet.cell(row, columns["뜻"]).value)
-            if not word or not meaning:
-                continue
-            words.append(
-                Word(
-                    row=row,
-                    source=self.text(sheet.cell(row, columns["출처"]).value),
-                    word=word,
-                    meaning=meaning,
-                    example=self.text(sheet.cell(row, columns["예문"]).value),
-                    example_meaning=self.text(sheet.cell(row, columns["예문뜻"]).value),
-                    note=self.text(sheet.cell(row, columns["비고"]).value),
-                    correct_count=self.number(sheet.cell(row, columns["정답횟수"]).value),
-                    wrong_count=self.number(sheet.cell(row, columns["오답횟수"]).value),
-                    total_count=self.number(sheet.cell(row, columns["총시도"]).value),
-                    last_result=self.text(sheet.cell(row, columns["최근결과"]).value),
-                    last_tested_at=self.text(sheet.cell(row, columns["최근테스트일"]).value),
-                    streak_correct=self.number(sheet.cell(row, columns["연속정답"]).value),
-                    memory_state=self.text(sheet.cell(row, columns["암기상태"]).value) or "미학습",
-                )
-            )
-        return words
+        with self.transaction() as connection:
+            rows = connection.execute("SELECT * FROM words ORDER BY source, id").fetchall()
+        return [self.word_from_row(row) for row in rows]
 
     def save_result(self, word: Word, is_correct: bool) -> None:
-        workbook = load_workbook(self.path)
-        sheet = workbook.active
-        columns = self.columns(sheet)
-
         correct = word.correct_count + (1 if is_correct else 0)
         wrong = word.wrong_count + (0 if is_correct else 1)
         total = word.total_count + 1
         streak = word.streak_correct + 1 if is_correct else 0
         result = "정답" if is_correct else "오답"
         state = self.memory_state(correct, wrong, total, streak)
+        tested_at = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-        sheet.cell(word.row, columns["정답횟수"], correct)
-        sheet.cell(word.row, columns["오답횟수"], wrong)
-        sheet.cell(word.row, columns["총시도"], total)
-        sheet.cell(word.row, columns["최근결과"], result)
-        sheet.cell(word.row, columns["최근테스트일"], datetime.now().strftime("%Y-%m-%d %H:%M"))
-        sheet.cell(word.row, columns["연속정답"], streak)
-        sheet.cell(word.row, columns["암기상태"], state)
-        workbook.save(self.path)
+        with self.transaction() as connection:
+            connection.execute(
+                """
+                UPDATE words
+                SET correct_count = ?,
+                    wrong_count = ?,
+                    total_count = ?,
+                    last_result = ?,
+                    last_tested_at = ?,
+                    streak_correct = ?,
+                    memory_state = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (correct, wrong, total, result, tested_at, streak, state, word.row),
+            )
+
+    def import_excel(self) -> dict[str, int | str]:
+        if not self.excel_path.exists():
+            raise FileNotFoundError(f"Excel 파일을 찾을 수 없습니다: {self.excel_path}")
+
+        workbook = load_workbook(self.excel_path)
+        added = 0
+        updated = 0
+        skipped = 0
+        try:
+            sheet = workbook.active
+            columns = self.columns(sheet)
+            required = ["단어", "뜻"]
+            missing = [header for header in required if header not in columns]
+            if missing:
+                raise ValueError(f"Excel에 필요한 열이 없습니다: {', '.join(missing)}")
+
+            with self.transaction() as connection:
+                for row in range(2, sheet.max_row + 1):
+                    source = self.text(sheet.cell(row, columns.get("출처", 0)).value) if "출처" in columns else ""
+                    word = self.text(sheet.cell(row, columns["단어"]).value)
+                    meaning = self.text(sheet.cell(row, columns["뜻"]).value)
+                    if not word or not meaning:
+                        skipped += 1
+                        continue
+
+                    values = {
+                        "source": source,
+                        "word": word,
+                        "meaning": meaning,
+                        "example": self.text(sheet.cell(row, columns.get("예문", 0)).value) if "예문" in columns else "",
+                        "example_meaning": self.text(sheet.cell(row, columns.get("예문뜻", 0)).value)
+                        if "예문뜻" in columns
+                        else "",
+                        "note": self.text(sheet.cell(row, columns.get("비고", 0)).value) if "비고" in columns else "",
+                        "correct_count": self.number(sheet.cell(row, columns.get("정답횟수", 0)).value)
+                        if "정답횟수" in columns
+                        else 0,
+                        "wrong_count": self.number(sheet.cell(row, columns.get("오답횟수", 0)).value)
+                        if "오답횟수" in columns
+                        else 0,
+                        "total_count": self.number(sheet.cell(row, columns.get("총시도", 0)).value)
+                        if "총시도" in columns
+                        else 0,
+                        "last_result": self.text(sheet.cell(row, columns.get("최근결과", 0)).value)
+                        if "최근결과" in columns
+                        else "",
+                        "last_tested_at": self.text(sheet.cell(row, columns.get("최근테스트일", 0)).value)
+                        if "최근테스트일" in columns
+                        else "",
+                        "streak_correct": self.number(sheet.cell(row, columns.get("연속정답", 0)).value)
+                        if "연속정답" in columns
+                        else 0,
+                        "memory_state": self.text(sheet.cell(row, columns.get("암기상태", 0)).value)
+                        if "암기상태" in columns
+                        else "미학습",
+                    }
+                    if not values["memory_state"]:
+                        values["memory_state"] = "미학습"
+
+                    exists = connection.execute(
+                        """
+                        SELECT 1
+                        FROM words
+                        WHERE source = ? AND word = ? AND meaning = ?
+                        """,
+                        (source, word, meaning),
+                    ).fetchone()
+                    cursor = connection.execute(
+                        """
+                        INSERT INTO words (
+                            source, word, meaning, example, example_meaning, note,
+                            correct_count, wrong_count, total_count, last_result,
+                            last_tested_at, streak_correct, memory_state
+                        )
+                        VALUES (
+                            :source, :word, :meaning, :example, :example_meaning, :note,
+                            :correct_count, :wrong_count, :total_count, :last_result,
+                            :last_tested_at, :streak_correct, :memory_state
+                        )
+                        ON CONFLICT(source, word, meaning) DO UPDATE SET
+                            example = excluded.example,
+                            example_meaning = excluded.example_meaning,
+                            note = excluded.note,
+                            updated_at = CURRENT_TIMESTAMP
+                        """,
+                        values,
+                    )
+                    if exists:
+                        updated += 1
+                    else:
+                        added += 1
+        finally:
+            workbook.close()
+
+        return {"added": added, "updated": updated, "skipped": skipped, "path": str(self.excel_path)}
+
+    def export_excel(self) -> dict[str, int | str]:
+        workbook = Workbook()
+        try:
+            sheet = workbook.active
+            sheet.title = "Words"
+            sheet.append(HEADERS)
+            for word in self.list_words():
+                sheet.append(
+                    [
+                        word.source,
+                        word.word,
+                        word.meaning,
+                        word.example,
+                        word.example_meaning,
+                        word.note,
+                        word.correct_count,
+                        word.wrong_count,
+                        word.total_count,
+                        word.last_result,
+                        word.last_tested_at,
+                        word.streak_correct,
+                        word.memory_state,
+                    ]
+                )
+            try:
+                workbook.save(self.excel_path)
+            except PermissionError as exc:
+                raise PermissionError(f"Excel 파일을 저장할 수 없습니다. 파일을 닫고 다시 시도하세요: {self.excel_path}") from exc
+        finally:
+            workbook.close()
+        return {"exported": len(self.list_words()), "path": str(self.excel_path)}
 
     @staticmethod
     def memory_state(correct: int, wrong: int, total: int, streak: int) -> str:
@@ -364,8 +514,8 @@ class VocabApp(tk.Tk):
 
 
 def app_root() -> Path:
-    cwd_db = Path.cwd() / "단어DB.xlsx"
-    if cwd_db.exists():
+    cwd = Path.cwd()
+    if (cwd / "vocab.db").exists() or (cwd / "단어DB.xlsx").exists():
         return Path.cwd()
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
@@ -373,6 +523,6 @@ def app_root() -> Path:
 
 
 if __name__ == "__main__":
-    db_path = app_root() / "단어DB.xlsx"
-    app = VocabApp(WorkbookStore(db_path))
+    root = app_root()
+    app = VocabApp(WorkbookStore(root / "vocab.db", root / "단어DB.xlsx"))
     app.mainloop()

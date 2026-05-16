@@ -64,3 +64,15 @@ export type QuizResultSummary = {
   count: number;
   mode: QuizMode;
 };
+
+export type ExcelImportResult = {
+  added: number;
+  updated: number;
+  skipped: number;
+  path: string;
+};
+
+export type ExcelExportResult = {
+  exported: number;
+  path: string;
+};

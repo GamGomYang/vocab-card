@@ -13,11 +13,12 @@ from native_vocab_app import WorkbookStore, Word
 
 QuizMode = Literal["word_to_meaning", "meaning_to_word"]
 ERROR_ALREADY_EXISTS = 183
+SINGLE_INSTANCE_MUTEX = "VocabCardDesktopSingleInstance"
 
 
 def app_root() -> Path:
-    cwd_db = Path.cwd() / "단어DB.xlsx"
-    if cwd_db.exists():
+    cwd = Path.cwd()
+    if (cwd / "vocab.db").exists() or (cwd / "단어DB.xlsx").exists():
         return Path.cwd()
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
@@ -35,7 +36,7 @@ def frontend_index(root: Path) -> Path:
 def word_to_api(word: Word) -> dict:
     accuracy = 0 if word.total_count == 0 else round((word.correct_count / word.total_count) * 100, 1)
     return {
-        "id": word.row - 1,
+        "id": word.row,
         "source": word.source,
         "word": word.word,
         "meaning": word.meaning,
@@ -81,8 +82,8 @@ class Api:
             random.shuffle(choices)
             questions.append(
                 {
-                    "questionId": target.row - 1,
-                    "wordId": target.row - 1,
+                    "questionId": target.row,
+                    "wordId": target.row,
                     "mode": mode,
                     "source": target.source,
                     "word": target.word,
@@ -98,7 +99,7 @@ class Api:
 
     def submitAnswer(self, wordId: int, selectedAnswer: str, mode: QuizMode = "word_to_meaning") -> dict:
         words = self.store.list_words()
-        word = next((item for item in words if item.row - 1 == int(wordId)), None)
+        word = next((item for item in words if item.row == int(wordId)), None)
         if word is None:
             raise ValueError("Word not found")
 
@@ -146,18 +147,26 @@ class Api:
             "topWrongWords": [word_to_api(word) for word in top_wrong],
         }
 
+    def importExcel(self) -> dict:
+        return self.store.import_excel()
+
+    def exportExcel(self) -> dict:
+        return self.store.export_excel()
+
 
 if __name__ == "__main__":
-    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "Global\\VocabCardDesktopSingleInstance")
+    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, SINGLE_INSTANCE_MUTEX)
     if mutex and ctypes.windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
         sys.exit(0)
+    if not mutex:
+        raise ctypes.WinError()
 
     root = app_root()
     index = frontend_index(root)
     if not index.exists():
         raise FileNotFoundError(f"Frontend build was not found: {index}")
 
-    api = Api(WorkbookStore(root / "단어DB.xlsx"))
+    api = Api(WorkbookStore(root / "vocab.db", root / "단어DB.xlsx"))
     webview.create_window(
         "단어 테스트",
         index.as_uri(),

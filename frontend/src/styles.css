@@ -496,6 +496,15 @@ td {
   background: #fff4f4;
 }
 
+.success-banner {
+  margin-bottom: 16px;
+  border: 1px solid #bfe3cf;
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: #f1fbf5;
+  color: #237348;
+}
+
 .empty-text {
   color: #617083;
 }

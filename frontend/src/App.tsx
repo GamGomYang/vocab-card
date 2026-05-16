@@ -24,6 +24,7 @@ function App() {
   const [mode, setMode] = useState<QuizMode>("word_to_meaning");
   const [summary, setSummary] = useState<QuizResultSummary | null>(null);
   const [loadError, setLoadError] = useState("");
+  const [syncStatus, setSyncStatus] = useState("");
 
   useEffect(() => {
     window.history.replaceState({ page: "home" }, "", window.location.href);
@@ -43,15 +44,42 @@ function App() {
     }
   };
 
-  useEffect(() => {
+  const refreshSources = () => {
     vocabApi
       .getSources()
       .then((items) => {
         setSources(items);
-        setSource(items[0] ?? "");
+        setSource((current) => (current && items.includes(current) ? current : items[0] ?? ""));
       })
       .catch((error: Error) => setLoadError(error.message));
+  };
+
+  useEffect(() => {
+    refreshSources();
   }, []);
+
+  const importExcel = async () => {
+    setSyncStatus("");
+    setLoadError("");
+    try {
+      const result = await vocabApi.importExcel();
+      setSyncStatus(`Excel 가져오기 완료: 추가 ${result.added}개, 갱신 ${result.updated}개, 건너뜀 ${result.skipped}개`);
+      refreshSources();
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Excel 가져오기에 실패했습니다.");
+    }
+  };
+
+  const exportExcel = async () => {
+    setSyncStatus("");
+    setLoadError("");
+    try {
+      const result = await vocabApi.exportExcel();
+      setSyncStatus(`Excel 내보내기 완료: ${result.exported}개 저장`);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Excel 내보내기에 실패했습니다.");
+    }
+  };
 
   return (
     <main className="app-shell">
@@ -74,6 +102,7 @@ function App() {
       </nav>
 
       {loadError && <div className="error-banner">백엔드 연결 오류: {loadError}</div>}
+      {syncStatus && <div className="success-banner">{syncStatus}</div>}
 
       {page === "home" && (
         <HomePage
@@ -87,6 +116,8 @@ function App() {
           onStart={() => navigate("quiz")}
           onReview={() => navigate("review")}
           onStats={() => navigate("stats")}
+          onImportExcel={importExcel}
+          onExportExcel={exportExcel}
         />
       )}
 
@@ -129,6 +160,8 @@ function HomePage(props: {
   onStart: () => void;
   onReview: () => void;
   onStats: () => void;
+  onImportExcel: () => void;
+  onExportExcel: () => void;
 }) {
   return (
     <section className="home-grid">
@@ -187,6 +220,10 @@ function HomePage(props: {
         <div className="secondary-actions">
           <button onClick={props.onReview}>오답노트</button>
           <button onClick={props.onStats}>학습 통계</button>
+        </div>
+        <div className="secondary-actions">
+          <button onClick={props.onImportExcel}>Excel에서 가져오기</button>
+          <button onClick={props.onExportExcel}>Excel로 내보내기</button>
         </div>
       </section>
     </section>

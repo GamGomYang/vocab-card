@@ -1,4 +1,12 @@
-import type { AnswerResult, QuizMode, QuizQuestion, StatsSummary, VocabWord } from "../types/vocab";
+import type {
+  AnswerResult,
+  ExcelExportResult,
+  ExcelImportResult,
+  QuizMode,
+  QuizQuestion,
+  StatsSummary,
+  VocabWord,
+} from "../types/vocab";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -8,6 +16,8 @@ type DesktopApi = {
   submitAnswer: (wordId: number, selectedAnswer: string, mode: QuizMode) => Promise<AnswerResult>;
   getWrongWords: () => Promise<VocabWord[]>;
   getStats: () => Promise<StatsSummary>;
+  importExcel: () => Promise<ExcelImportResult>;
+  exportExcel: () => Promise<ExcelExportResult>;
 };
 
 declare global {
@@ -88,5 +98,17 @@ export const vocabApi = {
   getStats: async () => {
     const api = await waitForDesktopApi();
     return api?.getStats() ?? request<StatsSummary>("/stats");
+  },
+
+  importExcel: async () => {
+    const api = await waitForDesktopApi();
+    if (api) return api.importExcel();
+    return request<ExcelImportResult>("/excel/import", { method: "POST" });
+  },
+
+  exportExcel: async () => {
+    const api = await waitForDesktopApi();
+    if (api) return api.exportExcel();
+    return request<ExcelExportResult>("/excel/export", { method: "POST" });
   },
 };

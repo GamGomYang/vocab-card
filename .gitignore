@@ -31,6 +31,7 @@ Thumbs.db
 .DS_Store
 
 # App data backups
+vocab.db
 *.backup-*.xlsx
 ~$*.xlsx
 logs/
