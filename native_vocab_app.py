@@ -6,7 +6,7 @@ import sys
 import os
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -109,6 +109,33 @@ class WorkbookStore:
             )
             connection.execute("CREATE INDEX IF NOT EXISTS idx_words_source ON words(source)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_words_wrong_count ON words(wrong_count)")
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS answer_attempts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    word_id INTEGER NOT NULL,
+                    mode TEXT NOT NULL DEFAULT '',
+                    selected_answer TEXT NOT NULL DEFAULT '',
+                    correct_answer TEXT NOT NULL DEFAULT '',
+                    is_correct INTEGER NOT NULL,
+                    attempted_at TEXT NOT NULL,
+                    attempted_date TEXT NOT NULL,
+                    FOREIGN KEY(word_id) REFERENCES words(id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_answer_attempts_date_correct
+                ON answer_attempts(attempted_date, is_correct)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_answer_attempts_word_date
+                ON answer_attempts(word_id, attempted_date)
+                """
+            )
 
     def import_excel_if_empty(self) -> None:
         if not self.excel_path.exists():
@@ -160,14 +187,72 @@ class WorkbookStore:
             rows = connection.execute("SELECT * FROM words ORDER BY source, id").fetchall()
         return [self.word_from_row(row) for row in rows]
 
-    def save_result(self, word: Word, is_correct: bool) -> None:
+    @staticmethod
+    def target_date(days_ago: int) -> str:
+        days = max(0, int(days_ago))
+        return (date.today() - timedelta(days=days)).isoformat()
+
+    def list_wrong_words_by_date(self, days_ago: int) -> list[Word]:
+        attempted_date = self.target_date(days_ago)
+        with self.transaction() as connection:
+            rows = connection.execute(
+                """
+                SELECT words.*
+                FROM words
+                JOIN (
+                    SELECT word_id, COUNT(*) AS wrong_attempts, MAX(attempted_at) AS last_wrong_at
+                    FROM answer_attempts
+                    WHERE attempted_date = ? AND is_correct = 0
+                    GROUP BY word_id
+                ) daily_wrong ON daily_wrong.word_id = words.id
+                ORDER BY daily_wrong.wrong_attempts DESC, daily_wrong.last_wrong_at DESC, words.id
+                """,
+                (attempted_date,),
+            ).fetchall()
+        return [self.word_from_row(row) for row in rows]
+
+    def wrong_dates(self, limit: int = 30) -> list[dict[str, int | str]]:
+        max_rows = max(1, int(limit))
+        with self.transaction() as connection:
+            rows = connection.execute(
+                """
+                SELECT attempted_date, COUNT(*) AS attempts, COUNT(DISTINCT word_id) AS words
+                FROM answer_attempts
+                WHERE is_correct = 0
+                GROUP BY attempted_date
+                ORDER BY attempted_date DESC
+                LIMIT ?
+                """,
+                (max_rows,),
+            ).fetchall()
+        today = date.today()
+        return [
+            {
+                "date": str(row["attempted_date"]),
+                "daysAgo": max(0, (today - date.fromisoformat(str(row["attempted_date"]))).days),
+                "attempts": int(row["attempts"]),
+                "words": int(row["words"]),
+            }
+            for row in rows
+        ]
+
+    def save_result(
+        self,
+        word: Word,
+        is_correct: bool,
+        selected_answer: str = "",
+        correct_answer: str = "",
+        mode: str = "",
+    ) -> None:
         correct = word.correct_count + (1 if is_correct else 0)
         wrong = word.wrong_count + (0 if is_correct else 1)
         total = word.total_count + 1
         streak = word.streak_correct + 1 if is_correct else 0
         result = "정답" if is_correct else "오답"
         state = self.memory_state(correct, wrong, total, streak)
-        tested_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+        now = datetime.now()
+        tested_at = now.strftime("%Y-%m-%d %H:%M")
+        attempted_at = now.strftime("%Y-%m-%d %H:%M:%S")
 
         with self.transaction() as connection:
             connection.execute(
@@ -184,6 +269,24 @@ class WorkbookStore:
                 WHERE id = ?
                 """,
                 (correct, wrong, total, result, tested_at, streak, state, word.row),
+            )
+            connection.execute(
+                """
+                INSERT INTO answer_attempts (
+                    word_id, mode, selected_answer, correct_answer,
+                    is_correct, attempted_at, attempted_date
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    word.row,
+                    mode,
+                    selected_answer,
+                    correct_answer,
+                    1 if is_correct else 0,
+                    attempted_at,
+                    now.date().isoformat(),
+                ),
             )
 
     def import_excel(self) -> dict[str, int | str]:

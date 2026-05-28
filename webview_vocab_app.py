@@ -90,9 +90,19 @@ class Api:
         words = self.store.list_words()
         pool = [word for word in words if not source or word.source == source]
         pool = [word for word in pool if word.word and word.meaning]
+        return self.build_quiz(words, pool, count, mode)
+
+    def getWrongQuiz(self, count: int = 50, mode: QuizMode = "meaning_to_word", daysAgo: int | None = None) -> list[dict]:
+        words = self.store.list_words()
+        if daysAgo is None:
+            pool = [word for word in words if word.wrong_count > 0 and word.word and word.meaning]
+        else:
+            pool = [word for word in self.store.list_wrong_words_by_date(daysAgo) if word.word and word.meaning]
+        return self.build_quiz(words, pool, count, mode)
+
+    def build_quiz(self, words: list[Word], pool: list[Word], count: int, mode: QuizMode) -> list[dict]:
         if not pool:
             return []
-
         targets = choose_quiz_targets(pool, count)
         questions = []
         for target in targets:
@@ -129,8 +139,13 @@ class Api:
             raise ValueError("Word not found")
 
         correct_answer = word.meaning if mode == "word_to_meaning" else word.word
-        is_correct = selectedAnswer.strip() == correct_answer.strip()
-        self.store.save_result(word, is_correct)
+        selected = selectedAnswer.strip()
+        expected = correct_answer.strip()
+        if mode == "meaning_to_word":
+            is_correct = selected.casefold() == expected.casefold()
+        else:
+            is_correct = selected == expected
+        self.store.save_result(word, is_correct, selected, correct_answer, mode)
         updated = next(item for item in self.store.list_words() if item.row == word.row)
         return {
             "isCorrect": is_correct,
@@ -151,6 +166,12 @@ class Api:
         words = [word for word in self.store.list_words() if word.wrong_count > 0]
         words.sort(key=lambda item: (item.wrong_count, item.total_count), reverse=True)
         return [word_to_api(word) for word in words]
+
+    def getWrongWordsByDate(self, daysAgo: int = 0) -> list[dict]:
+        return [word_to_api(word) for word in self.store.list_wrong_words_by_date(daysAgo)]
+
+    def getWrongDates(self, limit: int = 30) -> list[dict]:
+        return self.store.wrong_dates(limit)
 
     def getStats(self) -> dict:
         words = self.store.list_words()

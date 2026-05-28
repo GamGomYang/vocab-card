@@ -63,7 +63,8 @@ button:disabled {
 }
 
 .nav-actions,
-.secondary-actions {
+.secondary-actions,
+.review-actions {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -248,6 +249,9 @@ input {
 .primary-action.compact {
   min-height: 44px;
   align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .secondary-actions button {
@@ -330,6 +334,21 @@ input {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.typing-answer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  padding: 18px;
+  border: 1px solid #dfe6ee;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.typing-answer .primary-action {
+  min-width: 120px;
 }
 
 .choice-button {
@@ -434,6 +453,59 @@ input {
   border-radius: 8px;
   padding: 0 12px;
   background: #ffffff;
+}
+
+.review-actions {
+  justify-content: flex-end;
+}
+
+.wrong-date-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 12px;
+  border: 1px solid #dfe6ee;
+  border-radius: 8px;
+  background: #f8fbfd;
+}
+
+.wrong-date-panel > div:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #344154;
+  white-space: nowrap;
+}
+
+.wrong-date-panel span {
+  color: #617083;
+  font-size: 13px;
+}
+
+.date-filter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.date-filter button {
+  min-height: 36px;
+  border: 1px solid #ced8e4;
+  border-radius: 8px;
+  padding: 0 12px;
+  background: #ffffff;
+  color: #344154;
+  font-weight: 750;
+}
+
+.date-filter button.active {
+  border-color: #0c6b58;
+  background: #e5f4ef;
+  color: #075445;
 }
 
 .search-box input {
@@ -546,6 +618,19 @@ td {
   .quiz-result-bar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .wrong-date-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .date-filter {
+    justify-content: flex-start;
+  }
+
+  .typing-answer {
+    grid-template-columns: 1fr;
   }
 }
 

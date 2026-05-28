@@ -1,16 +1,26 @@
-import { BarChart3, BookOpenCheck, Home, RotateCcw, Search, Trophy } from "lucide-react";
+import { BarChart3, BookOpenCheck, CalendarDays, Home, Keyboard, RotateCcw, Search, Trophy } from "lucide-react";
+import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { vocabApi } from "./api/vocabApi";
-import type { AnswerResult, QuizMode, QuizQuestion, QuizResultSummary, StatsSummary, VocabWord } from "./types/vocab";
+import type {
+  AnswerMode,
+  AnswerResult,
+  QuizMode,
+  QuizQuestion,
+  QuizResultSummary,
+  StatsSummary,
+  VocabWord,
+  WrongDateSummary,
+} from "./types/vocab";
 
-type Page = "home" | "quiz" | "result" | "review" | "stats";
+type Page = "home" | "quiz" | "wrongQuiz" | "result" | "review" | "stats";
 
 const modeLabels: Record<QuizMode, string> = {
   word_to_meaning: "단어 -> 뜻",
   meaning_to_word: "뜻 -> 단어",
 };
 
-const pages = new Set<Page>(["home", "quiz", "result", "review", "stats"]);
+const pages = new Set<Page>(["home", "quiz", "wrongQuiz", "result", "review", "stats"]);
 
 function isPage(value: unknown): value is Page {
   return typeof value === "string" && pages.has(value as Page);
@@ -22,6 +32,7 @@ function App() {
   const [source, setSource] = useState("");
   const [count, setCount] = useState(10);
   const [mode, setMode] = useState<QuizMode>("word_to_meaning");
+  const [wrongDaysAgo, setWrongDaysAgo] = useState<number | null>(null);
   const [summary, setSummary] = useState<QuizResultSummary | null>(null);
   const [loadError, setLoadError] = useState("");
   const [syncStatus, setSyncStatus] = useState("");
@@ -126,7 +137,25 @@ function App() {
           source={source}
           count={count}
           mode={mode}
+          answerMode="choice"
+          wrongOnly={false}
           onExit={() => navigate("home")}
+          onDone={(result) => {
+            setSummary(result);
+            navigate("result");
+          }}
+        />
+      )}
+
+      {page === "wrongQuiz" && (
+        <QuizPage
+          source=""
+          count={999}
+          mode="meaning_to_word"
+          answerMode="typing"
+          wrongOnly
+          wrongDaysAgo={wrongDaysAgo}
+          onExit={() => navigate("review")}
           onDone={(result) => {
             setSummary(result);
             navigate("result");
@@ -137,13 +166,19 @@ function App() {
       {page === "result" && summary && (
         <ResultPage
           summary={summary}
-          onRetry={() => navigate("quiz")}
+          onRetry={() => navigate(summary.answerMode === "typing" ? "wrongQuiz" : "quiz")}
           onReview={() => navigate("review")}
           onHome={() => navigate("home")}
         />
       )}
 
-      {page === "review" && <ReviewPage />}
+      {page === "review" && (
+        <ReviewPage
+          selectedDaysAgo={wrongDaysAgo}
+          onSelectDaysAgo={setWrongDaysAgo}
+          onStartWrongQuiz={() => navigate("wrongQuiz")}
+        />
+      )}
       {page === "stats" && <StatsPage />}
     </main>
   );
@@ -234,6 +269,9 @@ function QuizPage(props: {
   source: string;
   count: number;
   mode: QuizMode;
+  answerMode: AnswerMode;
+  wrongOnly: boolean;
+  wrongDaysAgo?: number | null;
   onExit: () => void;
   onDone: (summary: QuizResultSummary) => void;
 }) {
@@ -241,6 +279,7 @@ function QuizPage(props: {
   const [index, setIndex] = useState(0);
   const [result, setResult] = useState<AnswerResult | null>(null);
   const [selected, setSelected] = useState("");
+  const [typedAnswer, setTypedAnswer] = useState("");
   const [answers, setAnswers] = useState<AnswerResult[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -249,19 +288,23 @@ function QuizPage(props: {
   useEffect(() => {
     setLoading(true);
     setError("");
-    vocabApi
-      .getQuiz(props.source, props.count, props.mode)
+    const quizRequest = props.wrongOnly
+      ? vocabApi.getWrongQuiz(props.count, props.mode, props.wrongDaysAgo ?? null)
+      : vocabApi.getQuiz(props.source, props.count, props.mode);
+
+    quizRequest
       .then((items) => {
         setQuestions(items);
         setIndex(0);
         setResult(null);
         setSelected("");
+        setTypedAnswer("");
         setAnswers([]);
         setIsSubmitting(false);
       })
       .catch((apiError: Error) => setError(apiError.message))
       .finally(() => setLoading(false));
-  }, [props.source, props.count, props.mode]);
+  }, [props.source, props.count, props.mode, props.wrongOnly, props.wrongDaysAgo]);
 
   const question = questions[index];
   const correctCount = answers.filter((answer) => answer.isCorrect).length;
@@ -283,6 +326,13 @@ function QuizPage(props: {
     }
   };
 
+  const submitTypedAnswer = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const answer = typedAnswer.trim();
+    if (!answer) return;
+    submit(answer);
+  };
+
   const next = () => {
     const nextIndex = index + 1;
     const finalWrongAnswers = wrongAnswers;
@@ -296,6 +346,8 @@ function QuizPage(props: {
         source: props.source,
         count: props.count,
         mode: props.mode,
+        answerMode: props.answerMode,
+        wrongDaysAgo: props.wrongDaysAgo ?? null,
       });
       return;
     }
@@ -303,6 +355,7 @@ function QuizPage(props: {
     setIndex(nextIndex);
     setResult(null);
     setSelected("");
+    setTypedAnswer("");
   };
 
   if (loading) return <section className="center-panel">문제를 불러오는 중입니다.</section>;
@@ -322,28 +375,52 @@ function QuizPage(props: {
       </div>
 
       <article className="quiz-card">
-        <p>{props.mode === "word_to_meaning" ? "이 단어의 뜻으로 알맞은 것은?" : "이 뜻에 맞는 단어는?"}</p>
+        <p>
+          {props.answerMode === "typing"
+            ? "뜻을 보고 영어 단어를 직접 입력하세요."
+            : props.mode === "word_to_meaning"
+              ? "이 단어의 뜻으로 알맞은 것은?"
+              : "이 뜻에 맞는 단어는?"}
+        </p>
         <h2>{question.questionText}</h2>
         {result && question.example && <span className="example-line">{question.example}</span>}
         {result && question.exampleMeaning && <span className="example-meaning-line">{question.exampleMeaning}</span>}
       </article>
 
-      <div className="choices-grid">
-        {question.choices.map((choice) => {
-          const isCorrect = result && choice === result.correctAnswer;
-          const isWrong = result && choice === selected && !result.isCorrect;
-          return (
-            <button
-              key={choice}
-              className={`choice-button ${isCorrect ? "correct" : ""} ${isWrong ? "wrong" : ""}`}
-              onClick={() => submit(choice)}
+      {props.answerMode === "typing" ? (
+        <form className="typing-answer" onSubmit={submitTypedAnswer}>
+          <label>
+            내 답
+            <input
+              value={typedAnswer}
+              onChange={(event) => setTypedAnswer(event.target.value)}
+              placeholder="영어 단어 입력"
+              autoFocus
               disabled={Boolean(result) || isSubmitting}
-            >
-              {choice}
-            </button>
-          );
-        })}
-      </div>
+            />
+          </label>
+          <button className="primary-action" disabled={Boolean(result) || isSubmitting || !typedAnswer.trim()}>
+            채점
+          </button>
+        </form>
+      ) : (
+        <div className="choices-grid">
+          {question.choices.map((choice) => {
+            const isCorrect = result && choice === result.correctAnswer;
+            const isWrong = result && choice === selected && !result.isCorrect;
+            return (
+              <button
+                key={choice}
+                className={`choice-button ${isCorrect ? "correct" : ""} ${isWrong ? "wrong" : ""}`}
+                onClick={() => submit(choice)}
+                disabled={Boolean(result) || isSubmitting}
+              >
+                {choice}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {result && (
         <section className={`quiz-result-bar ${result.isCorrect ? "correct" : "wrong"}`}>
@@ -418,13 +495,33 @@ function ResultPage(props: {
   );
 }
 
-function ReviewPage() {
+function formatWrongDateLabel(daysAgo: number | null) {
+  if (daysAgo === null) return "전체 누적";
+  if (daysAgo === 0) return "오늘";
+  return `${daysAgo}일 전`;
+}
+
+function ReviewPage(props: {
+  selectedDaysAgo: number | null;
+  onSelectDaysAgo: (daysAgo: number | null) => void;
+  onStartWrongQuiz: () => void;
+}) {
   const [words, setWords] = useState<VocabWord[]>([]);
+  const [wrongDates, setWrongDates] = useState<WrongDateSummary[]>([]);
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
-    vocabApi.getWrongWords().then(setWords).catch((apiError: Error) => setError(apiError.message));
+    setError("");
+    const request =
+      props.selectedDaysAgo === null
+        ? vocabApi.getWrongWords()
+        : vocabApi.getWrongWordsByDate(props.selectedDaysAgo);
+    request.then(setWords).catch((apiError: Error) => setError(apiError.message));
+  }, [props.selectedDaysAgo]);
+
+  useEffect(() => {
+    vocabApi.getWrongDates(30).then(setWrongDates).catch((apiError: Error) => setError(apiError.message));
   }, []);
 
   const filtered = useMemo(() => {
@@ -445,11 +542,53 @@ function ReviewPage() {
           <p className="eyebrow">Review</p>
           <h1>오답노트</h1>
         </div>
-        <label className="search-box">
-          <Search size={18} />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="단어, 뜻, 예문 검색" />
-        </label>
+        <div className="review-actions">
+          <button className="primary-action compact" onClick={props.onStartWrongQuiz} disabled={words.length === 0}>
+            <Keyboard size={16} />
+            오답 타이핑 테스트
+          </button>
+          <label className="search-box">
+            <Search size={18} />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="단어, 뜻, 예문 검색" />
+          </label>
+        </div>
       </div>
+      <section className="wrong-date-panel">
+        <div>
+          <CalendarDays size={18} />
+          <strong>{formatWrongDateLabel(props.selectedDaysAgo)}</strong>
+          <span>{words.length}개 단어</span>
+        </div>
+        <div className="date-filter">
+          <button
+            className={props.selectedDaysAgo === null ? "active" : ""}
+            onClick={() => props.onSelectDaysAgo(null)}
+          >
+            전체 누적
+          </button>
+          {[0, 1, 2].map((daysAgo) => (
+            <button
+              key={daysAgo}
+              className={props.selectedDaysAgo === daysAgo ? "active" : ""}
+              onClick={() => props.onSelectDaysAgo(daysAgo)}
+            >
+              {formatWrongDateLabel(daysAgo)}
+            </button>
+          ))}
+          {wrongDates
+            .filter((item) => ![0, 1, 2].includes(item.daysAgo))
+            .map((item) => (
+              <button
+                key={item.date}
+                className={props.selectedDaysAgo === item.daysAgo ? "active" : ""}
+                onClick={() => props.onSelectDaysAgo(item.daysAgo)}
+                title={`${item.date} 오답 ${item.words}개`}
+              >
+                {item.date}
+              </button>
+            ))}
+        </div>
+      </section>
       {error ? <p className="error-text">{error}</p> : <WordTable words={filtered} />}
     </section>
   );

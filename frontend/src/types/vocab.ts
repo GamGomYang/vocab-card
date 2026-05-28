@@ -1,4 +1,5 @@
 export type QuizMode = "word_to_meaning" | "meaning_to_word";
+export type AnswerMode = "choice" | "typing";
 
 export type VocabWord = {
   id: number;
@@ -55,6 +56,13 @@ export type StatsSummary = {
   topWrongWords: VocabWord[];
 };
 
+export type WrongDateSummary = {
+  date: string;
+  daysAgo: number;
+  attempts: number;
+  words: number;
+};
+
 export type QuizResultSummary = {
   total: number;
   correct: number;
@@ -63,6 +71,8 @@ export type QuizResultSummary = {
   source: string;
   count: number;
   mode: QuizMode;
+  answerMode: AnswerMode;
+  wrongDaysAgo?: number | null;
 };
 
 export type ExcelImportResult = {
